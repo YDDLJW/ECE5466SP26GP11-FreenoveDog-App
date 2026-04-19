@@ -32,21 +32,39 @@ import com.example.a5466group11app.protocol.CommandBuilder;
 import com.example.a5466group11app.util.LogHelper;
 
 import java.util.List;
+import java.util.Locale;
 
 public class MainActivity extends AppCompatActivity implements BleManager.BleManagerListener {
 
     private static final int REQUEST_PERMISSIONS = 1002;
     private static final long MOVE_REPEAT_INTERVAL_MS = 250;
+    private static final long VERIFY_TIMEOUT_MS = 4000;
 
     private TextView tvConnectionStatus;
     private TextView tvLog;
     private Button btnConnectToggle;
+    private Button btnDisconnect;
     private ScrollView svLog;
 
     private BleManager bleManager;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private String activeMoveCommand = null;
+    private boolean verificationPending = false;
+    private boolean verifiedDevice = false;
+
+    private final Runnable verifyTimeoutRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (verificationPending) {
+                verificationPending = false;
+                verifiedDevice = false;
+                appendLog("Verification timeout");
+                Toast.makeText(MainActivity.this, "Wrong device or no verify response", Toast.LENGTH_SHORT).show();
+                bleManager.disconnect();
+            }
+        }
+    };
 
     private final ActivityResultLauncher<Intent> enableBluetoothLauncher =
             registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
@@ -95,6 +113,7 @@ public class MainActivity extends AppCompatActivity implements BleManager.BleMan
         tvConnectionStatus = findViewById(R.id.tvConnectionStatus);
         tvLog = findViewById(R.id.tvLog);
         btnConnectToggle = findViewById(R.id.btnConnectToggle);
+        btnDisconnect = findViewById(R.id.btnDisconnect);
         svLog = findViewById(R.id.svLog);
 
         Button btnVerify = findViewById(R.id.btnVerify);
@@ -125,14 +144,22 @@ public class MainActivity extends AppCompatActivity implements BleManager.BleMan
 
         btnConnectToggle.setOnClickListener(v -> {
             if (bleManager.isConnected()) {
-                stopContinuousMove();
-                bleManager.disconnect();
+                manualDisconnect();
             } else {
                 startBleFlow();
             }
         });
 
-        btnVerify.setOnClickListener(v -> sendCommand(CommandBuilder.verify()));
+        btnDisconnect.setOnClickListener(v -> manualDisconnect());
+
+        btnVerify.setOnClickListener(v -> {
+            if (bleManager.isConnected()) {
+                startVerification();
+            } else {
+                Toast.makeText(this, "BLE not connected", Toast.LENGTH_SHORT).show();
+            }
+        });
+
         btnStandToggle.setOnClickListener(v -> sendCommand(CommandBuilder.standToggle()));
         btnStandUp.setOnClickListener(v -> sendCommand(CommandBuilder.standUp()));
         btnLieDown.setOnClickListener(v -> sendCommand(CommandBuilder.lieDown()));
@@ -160,6 +187,56 @@ public class MainActivity extends AppCompatActivity implements BleManager.BleMan
         btnClearLog.setOnClickListener(v -> tvLog.setText(LogHelper.resetLog()));
     }
 
+    private void manualDisconnect() {
+        stopContinuousMove();
+        stopVerification();
+        verifiedDevice = false;
+        bleManager.disconnect();
+    }
+
+    private void startVerification() {
+        stopVerification();
+        verificationPending = true;
+        verifiedDevice = false;
+        appendLog("Sending verify command");
+        boolean success = bleManager.sendCommand(CommandBuilder.verify());
+        if (!success) {
+            verificationPending = false;
+            Toast.makeText(this, "BLE not ready", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        handler.postDelayed(verifyTimeoutRunnable, VERIFY_TIMEOUT_MS);
+    }
+
+    private void stopVerification() {
+        verificationPending = false;
+        handler.removeCallbacks(verifyTimeoutRunnable);
+    }
+
+    private void handleVerificationMessage(String message) {
+        if (!verificationPending) {
+            return;
+        }
+
+        String lower = message.toLowerCase(Locale.US);
+
+        if (lower.contains("illegal")) {
+            stopVerification();
+            verifiedDevice = false;
+            appendLog("Verification failed");
+            Toast.makeText(this, "Wrong device", Toast.LENGTH_SHORT).show();
+            bleManager.disconnect();
+            return;
+        }
+
+        if (lower.contains("legal")) {
+            stopVerification();
+            verifiedDevice = true;
+            appendLog("Verification passed");
+            Toast.makeText(this, "Correct device connected", Toast.LENGTH_SHORT).show();
+        }
+    }
+
     private boolean handleMoveTouch(android.view.MotionEvent event, String command) {
         switch (event.getAction()) {
             case android.view.MotionEvent.ACTION_DOWN:
@@ -176,8 +253,8 @@ public class MainActivity extends AppCompatActivity implements BleManager.BleMan
     }
 
     private void startContinuousMove(String command) {
-        if (!bleManager.isConnected()) {
-            Toast.makeText(this, "BLE not ready", Toast.LENGTH_SHORT).show();
+        if (!bleManager.isConnected() || !verifiedDevice) {
+            Toast.makeText(this, "Device not verified", Toast.LENGTH_SHORT).show();
             appendLog("Blocked continuous move: " + LogHelper.sanitizeCommand(command));
             return;
         }
@@ -253,6 +330,11 @@ public class MainActivity extends AppCompatActivity implements BleManager.BleMan
     }
 
     private void sendCommand(String command) {
+        if (!bleManager.isConnected() || !verifiedDevice) {
+            Toast.makeText(this, "Device not verified", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
         boolean success = bleManager.sendCommand(command);
         if (!success) {
             Toast.makeText(this, "BLE not ready", Toast.LENGTH_SHORT).show();
@@ -264,10 +346,12 @@ public class MainActivity extends AppCompatActivity implements BleManager.BleMan
             tvConnectionStatus.setText("Bluetooth: Connected");
             tvConnectionStatus.setTextColor(Color.parseColor("#2E7D32"));
             btnConnectToggle.setText("Disconnect");
+            btnDisconnect.setEnabled(true);
         } else {
             tvConnectionStatus.setText("Bluetooth: Disconnected");
             tvConnectionStatus.setTextColor(Color.parseColor("#D32F2F"));
             btnConnectToggle.setText("Connect");
+            btnDisconnect.setEnabled(false);
         }
     }
 
@@ -282,7 +366,7 @@ public class MainActivity extends AppCompatActivity implements BleManager.BleMan
     private void showDeviceSelectionDialog(List<BleDeviceItem> devices) {
         if (devices == null || devices.isEmpty()) {
             btnConnectToggle.setText("Connect");
-            Toast.makeText(this, "No Freenove dog found", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "No BLE device found", Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -295,6 +379,8 @@ public class MainActivity extends AppCompatActivity implements BleManager.BleMan
                 .setTitle("Select a device")
                 .setItems(items, (dialog, which) -> {
                     BleDeviceItem selected = devices.get(which);
+                    verifiedDevice = false;
+                    stopVerification();
                     appendLog("Selected device: " + selected.getName() + " (" + selected.getAddress() + ")");
                     btnConnectToggle.setText("Connecting...");
                     bleManager.connect(selected.getDevice());
@@ -314,6 +400,10 @@ public class MainActivity extends AppCompatActivity implements BleManager.BleMan
             updateConnectionStatus(connected);
             if (!connected) {
                 stopContinuousMove();
+                stopVerification();
+                verifiedDevice = false;
+            } else {
+                startVerification();
             }
         });
     }
@@ -330,6 +420,7 @@ public class MainActivity extends AppCompatActivity implements BleManager.BleMan
 
     @Override
     public void onMessageReceived(String message) {
+        runOnUiThread(() -> handleVerificationMessage(message));
     }
 
     @Override
@@ -337,6 +428,7 @@ public class MainActivity extends AppCompatActivity implements BleManager.BleMan
         runOnUiThread(() -> {
             if (!bleManager.isConnected()) {
                 btnConnectToggle.setText("Connect");
+                btnDisconnect.setEnabled(false);
             }
         });
     }
@@ -345,6 +437,7 @@ public class MainActivity extends AppCompatActivity implements BleManager.BleMan
     protected void onDestroy() {
         super.onDestroy();
         stopContinuousMove();
+        stopVerification();
         if (bleManager != null) {
             bleManager.release();
         }

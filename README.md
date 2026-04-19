@@ -21,8 +21,7 @@ This is a simple Android app for controlling a Freenove ESP32 robot dog via Blue
 
 ## How It Works
 
-1. The app scans for BLE devices with name starting with:
-   Freenove-Dog-
+1. The app scans for bluetooth devices
 
 2. Select a device from the list
 

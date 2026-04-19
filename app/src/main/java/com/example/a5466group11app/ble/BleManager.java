@@ -39,8 +39,6 @@ public class BleManager {
         void onBleError(String message);
     }
 
-    private static final String DEVICE_NAME_PREFIX = "Freenove-Dog-";
-
     private static final UUID SERVICE_UUID =
             UUID.fromString("0000ffe0-0000-1000-8000-00805f9b34fb");
     private static final UUID CHARACTERISTIC_UUID =
@@ -111,11 +109,12 @@ public class BleManager {
             }
 
             String name = device.getName();
-            if (name == null || !name.startsWith(DEVICE_NAME_PREFIX)) {
-                return;
+            String address = device.getAddress();
+
+            if (name == null || name.trim().isEmpty()) {
+                name = "Unknown Device";
             }
 
-            String address = device.getAddress();
             if (!scannedDevices.containsKey(address)) {
                 scannedDevices.put(address, new BleDeviceItem(name, address, device));
                 log("Discovered: " + name + " (" + address + ")");
@@ -294,7 +293,7 @@ public class BleManager {
         scannedDevices.clear();
         userInitiatedDisconnect = false;
 
-        log("Scanning for " + DEVICE_NAME_PREFIX + "*");
+        log("Scanning for BLE devices");
         isScanning = true;
 
         if (listener != null) {

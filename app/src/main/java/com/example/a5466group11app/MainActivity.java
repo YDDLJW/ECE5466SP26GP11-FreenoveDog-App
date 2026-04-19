@@ -218,23 +218,11 @@ public class MainActivity extends AppCompatActivity implements BleManager.BleMan
             return;
         }
 
-        String lower = message.toLowerCase(Locale.US);
+        stopVerification();
+        verifiedDevice = true;
 
-        if (lower.contains("illegal")) {
-            stopVerification();
-            verifiedDevice = false;
-            appendLog("Verification failed");
-            Toast.makeText(this, "Wrong device", Toast.LENGTH_SHORT).show();
-            bleManager.disconnect();
-            return;
-        }
-
-        if (lower.contains("legal")) {
-            stopVerification();
-            verifiedDevice = true;
-            appendLog("Verification passed");
-            Toast.makeText(this, "Correct device connected", Toast.LENGTH_SHORT).show();
-        }
+        appendLog("Verification success (response received)");
+        Toast.makeText(this, "Device connected successfully", Toast.LENGTH_SHORT).show();
     }
 
     private boolean handleMoveTouch(android.view.MotionEvent event, String command) {

@@ -66,6 +66,8 @@ public class BleManager {
 
     private final LinkedHashMap<String, BleDeviceItem> scannedDevices = new LinkedHashMap<>();
 
+    private final List<String> knownFfe0Devices = new ArrayList<>();
+
     public BleManager(Context context, BleManagerListener listener) {
         this.context = context;
         this.listener = listener;
@@ -191,9 +193,16 @@ public class BleManager {
             }
 
             BluetoothGattService service = gatt.getService(SERVICE_UUID);
+
             if (service == null) {
                 error("Service FFE0 not found");
                 return;
+            }
+
+            String address = gatt.getDevice().getAddress();
+            if (!knownFfe0Devices.contains(address)) {
+                knownFfe0Devices.add(address);
+                log("Marked as FFE0 device: " + address);
             }
 
             for (BluetoothGattCharacteristic characteristic : service.getCharacteristics()) {
@@ -401,6 +410,24 @@ public class BleManager {
 
         if (notifyFinished && listener != null) {
             List<BleDeviceItem> devices = new ArrayList<>(scannedDevices.values());
+
+            devices.sort((a, b) -> {
+
+                boolean aFfe0 = knownFfe0Devices.contains(a.getAddress());
+                boolean bFfe0 = knownFfe0Devices.contains(b.getAddress());
+
+                if (aFfe0 && !bFfe0) return -1;
+                if (!aFfe0 && bFfe0) return 1;
+
+                boolean aUnknown = a.getName().equals("Unknown Device");
+                boolean bUnknown = b.getName().equals("Unknown Device");
+
+                if (aUnknown && !bUnknown) return 1;
+                if (!aUnknown && bUnknown) return -1;
+
+                return a.getName().compareToIgnoreCase(b.getName());
+            });
+
             listener.onScanFinished(devices);
         }
     }
